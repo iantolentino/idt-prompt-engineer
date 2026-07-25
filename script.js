@@ -49,6 +49,62 @@ headers around the whole output — just the improved prompt text itself,
 ready to copy and paste (the improved prompt may contain its own numbered
 list as shown above).`;
 
+// ---- Free-tier usage guard (Groq free plan: 30 req/min, 1000 req/day, 12000 tokens/min, 100000 tokens/day) ----
+const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
+const USAGE_KEY = 'groqUsageLog'; // array of {ts, tokens}
+
+function loadUsageLog() {
+  try { return JSON.parse(localStorage.getItem(USAGE_KEY)) || []; }
+  catch { return []; }
+}
+function saveUsageLog(log) {
+  localStorage.setItem(USAGE_KEY, JSON.stringify(log));
+}
+function pruneLog(log) {
+  const now = Date.now();
+  return log.filter(e => now - e.ts < 24 * 60 * 60 * 1000); // keep last 24h only
+}
+function usageWithinWindow(log, windowMs) {
+  const now = Date.now();
+  const recent = log.filter(e => now - e.ts < windowMs);
+  return {
+    requests: recent.length,
+    tokens: recent.reduce((sum, e) => sum + e.tokens, 0)
+  };
+}
+function recordUsage(tokens) {
+  let log = pruneLog(loadUsageLog());
+  log.push({ ts: Date.now(), tokens });
+  saveUsageLog(log);
+  renderUsage();
+}
+function checkLimitsBeforeCall() {
+  const log = pruneLog(loadUsageLog());
+  const minute = usageWithinWindow(log, 60 * 1000);
+  const day = usageWithinWindow(log, 24 * 60 * 60 * 1000);
+
+  if (minute.requests >= LIMITS.reqPerMin) return 'Hit the per-minute request limit (30/min). Wait ~60s and try again.';
+  if (minute.tokens >= LIMITS.tokPerMin) return 'Hit the per-minute token limit (12,000/min). Wait ~60s and try again.';
+  if (day.requests >= LIMITS.reqPerDay) return 'Hit the daily request limit (1,000/day). Try again tomorrow.';
+  if (day.tokens >= LIMITS.tokPerDay) return 'Hit the daily token limit (100,000/day). Try again tomorrow.';
+  return null;
+}
+function renderUsage() {
+  const log = pruneLog(loadUsageLog());
+  const minute = usageWithinWindow(log, 60 * 1000);
+  const day = usageWithinWindow(log, 24 * 60 * 60 * 1000);
+  usageBar.textContent =
+    `Usage — this minute: ${minute.requests}/${LIMITS.reqPerMin} req, ${minute.tokens}/${LIMITS.tokPerMin} tok` +
+    `  |  today: ${day.requests}/${LIMITS.reqPerDay} req, ${day.tokens}/${LIMITS.tokPerDay} tok`;
+}
+
+const usageBar = document.createElement('div');
+usageBar.className = 'meta';
+usageBar.style.textAlign = 'center';
+usageBar.style.margin = '0 auto 16px';
+usageBar.style.maxWidth = '1200px';
+document.querySelector('.apikey-row').insertAdjacentElement('afterend', usageBar);
+
 const inputText = document.getElementById('inputText');
 const outputText = document.getElementById('outputText');
 const improveBtn = document.getElementById('improveBtn');
@@ -72,12 +128,34 @@ inputText.addEventListener('input', () => {
   inputMeta.textContent = `~${estimateTokens(inputText.value)} tokens (estimate)`;
 });
 
+renderUsage();
+
+const copyBtn = document.getElementById('copyBtn');
+copyBtn.addEventListener('click', async () => {
+  const text = outputText.textContent;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = copyBtn.textContent;
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => { copyBtn.textContent = original; }, 1500);
+  } catch {
+    alert('Could not copy automatically — select the text manually.');
+  }
+});
+
 improveBtn.addEventListener('click', async () => {
   const key = apiKeyInput.value.trim();
   const rough = inputText.value.trim();
 
   if (!key) { alert('Paste your Groq API key first.'); return; }
   if (!rough) { alert('Paste a prompt to improve first.'); return; }
+
+  const limitMsg = checkLimitsBeforeCall();
+  if (limitMsg) {
+    outputText.textContent = `Free-tier limit reached: ${limitMsg}`;
+    return;
+  }
 
   improveBtn.disabled = true;
   improveBtn.textContent = 'Improving...';
@@ -125,6 +203,9 @@ improveBtn.addEventListener('click', async () => {
       `Prompt tokens: ${usage.prompt_tokens ?? 'n/a'} | ` +
       `Completion tokens: ${usage.completion_tokens ?? 'n/a'} | ` +
       `Rough input: ~${before} tokens → Improved: ~${after} tokens (${diffLabel})`;
+
+    const totalTokensUsed = (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
+    recordUsage(totalTokensUsed || estimateTokens(rough) + after);
 
   } catch (err) {
     outputText.textContent = `Error: ${err.message}`;
