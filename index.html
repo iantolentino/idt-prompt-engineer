@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Prompt Improver</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:20px; }
+  h1 { text-align:center; font-size:1.4rem; margin-bottom:20px; }
+  .container { display:flex; gap:16px; max-width:1200px; margin:0 auto; flex-wrap:wrap; }
+  .panel { flex:1; min-width:300px; display:flex; flex-direction:column; }
+  textarea, .output {
+    flex:1; min-height:340px; background:#1c1c1c; color:#eee; border:1px solid #333;
+    border-radius:8px; padding:12px; font-size:0.95rem; resize:vertical; white-space:pre-wrap;
+  }
+  button {
+    margin-top:10px; padding:10px; border:none; border-radius:8px; background:#4f8cff;
+    color:white; font-weight:600; cursor:pointer;
+  }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+  .meta { margin-top:8px; font-size:0.85rem; color:#999; }
+  .apikey-row { max-width:1200px; margin:0 auto 20px; display:flex; gap:8px; }
+  .apikey-row input { flex:1; padding:8px; border-radius:6px; border:1px solid #333; background:#1c1c1c; color:#eee; }
+</style>
+</head>
+<body>
+  <h1>Prompt Improver</h1>
+
+  <div class="apikey-row">
+    <input id="apiKey" type="password" placeholder="Paste your Groq API key (saved only in this browser)">
+  </div>
+
+  <div class="container">
+    <div class="panel">
+      <textarea id="inputText" placeholder="Paste your rough prompt here..."></textarea>
+      <button id="improveBtn">Improve Prompt →</button>
+      <div class="meta" id="inputMeta"></div>
+    </div>
+    <div class="panel">
+      <div class="output" id="outputText"></div>
+      <div class="meta" id="outputMeta"></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
