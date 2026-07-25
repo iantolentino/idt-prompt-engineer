@@ -36,7 +36,7 @@ improveBtn.addEventListener('click', async () => {
   if (!rough) { alert('Paste a prompt to improve first.'); return; }
 
   improveBtn.disabled = true;
-  improveBtn.textContent = 'Improving...';
+  improveBtn.classList.add('spinning');
   outputText.textContent = '';
   outputMeta.textContent = '';
 
@@ -56,6 +56,7 @@ improveBtn.addEventListener('click', async () => {
     }
 
     outputText.textContent = data.improved;
+    document.getElementById('outputBadge')?.classList.add('active');
 
     const before = estimateTokens(rough);
     const after = data.tokenUsage?.completion_tokens ?? estimateTokens(data.improved);
@@ -77,7 +78,7 @@ improveBtn.addEventListener('click', async () => {
     outputText.textContent = `Error: ${err.message}`;
   } finally {
     improveBtn.disabled = false;
-    improveBtn.textContent = 'Improve Prompt →';
+    improveBtn.classList.remove('spinning');
   }
 });
 
