@@ -47,7 +47,14 @@ improveBtn.addEventListener('click', async () => {
       body: JSON.stringify({ prompt: rough })
     });
 
-    const data = await response.json();
+    let data;
+    const rawText = await response.text();
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      outputText.textContent = `Server error (not JSON): ${rawText.slice(0, 200)}`;
+      return;
+    }
 
     if (!response.ok) {
       outputText.textContent = `Free-tier limit or error: ${data.error || 'unknown error'}`;
