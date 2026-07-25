@@ -1,4 +1,6 @@
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 
 const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
 
@@ -44,10 +46,10 @@ async function getUsage() {
   const dayKey = `usage:day:${Math.floor(now / 86400000)}`;
 
   const [minReq, minTok, dayReq, dayTok] = await Promise.all([
-    kv.get(`${minuteKey}:req`) || 0,
-    kv.get(`${minuteKey}:tok`) || 0,
-    kv.get(`${dayKey}:req`) || 0,
-    kv.get(`${dayKey}:tok`) || 0,
+    redis.get(`${minuteKey}:req`) || 0,
+    redis.get(`${minuteKey}:tok`) || 0,
+    redis.get(`${dayKey}:req`) || 0,
+    redis.get(`${dayKey}:tok`) || 0,
   ]);
 
   return {
@@ -59,14 +61,14 @@ async function getUsage() {
 
 async function recordUsage(minuteKey, dayKey, tokens) {
   await Promise.all([
-    kv.incrby(`${minuteKey}:req`, 1),
-    kv.incrby(`${minuteKey}:tok`, tokens),
-    kv.expire(`${minuteKey}:req`, 120),
-    kv.expire(`${minuteKey}:tok`, 120),
-    kv.incrby(`${dayKey}:req`, 1),
-    kv.incrby(`${dayKey}:tok`, tokens),
-    kv.expire(`${dayKey}:req`, 172800),
-    kv.expire(`${dayKey}:tok`, 172800),
+    redis.incrby(`${minuteKey}:req`, 1),
+    redis.incrby(`${minuteKey}:tok`, tokens),
+    redis.expire(`${minuteKey}:req`, 120),
+    redis.expire(`${minuteKey}:tok`, 120),
+    redis.incrby(`${dayKey}:req`, 1),
+    redis.incrby(`${dayKey}:tok`, tokens),
+    redis.expire(`${dayKey}:req`, 172800),
+    redis.expire(`${dayKey}:tok`, 172800),
   ]);
 }
 
