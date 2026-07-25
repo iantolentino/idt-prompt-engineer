@@ -60,44 +60,19 @@ package.json    declares the Redis client dependency
 
 The following chart illustrates the average effectiveness score of the raw, unstructured prompt versus the structured, improved prompt across four leading AI models. The scores are derived from a blind evaluation of 50 complex engineering tasks, measuring **Requirement Fulfillment**, **Factual Accuracy**, and **Precision** (0–100 scale).
 
-<div align="center">
-  <svg width="700" height="380" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, sans-serif">
-    <rect width="700" height="380" fill="#ffffff" rx="10" />
-    <text x="350" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#1e293b">Effectiveness Score: Raw Prompt vs. Improved Prompt</text>
-    <text x="50" y="360" font-size="12" fill="#64748b" text-anchor="end">0</text>
-    <text x="50" y="260" font-size="12" fill="#64748b" text-anchor="end">50</text>
-    <text x="50" y="160" font-size="12" fill="#64748b" text-anchor="end">100</text>
-    <line x1="60" y1="355" x2="670" y2="355" stroke="#e2e8f0" stroke-width="1" />
-    <line x1="60" y1="255" x2="670" y2="255" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4" />
-    <line x1="60" y1="155" x2="670" y2="155" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4" />
-    <rect x="100" y="190" width="50" height="165" fill="#94a3b8" rx="3" />
-    <rect x="160" y="73" width="50" height="282" fill="#3b82f6" rx="3" />
-    <rect x="250" y="205" width="50" height="150" fill="#94a3b8" rx="3" />
-    <rect x="310" y="79" width="50" height="276" fill="#3b82f6" rx="3" />
-    <rect x="400" y="220" width="50" height="135" fill="#94a3b8" rx="3" />
-    <rect x="460" y="76" width="50" height="279" fill="#3b82f6" rx="3" />
-    <rect x="550" y="235" width="50" height="120" fill="#94a3b8" rx="3" />
-    <rect x="610" y="91" width="50" height="264" fill="#3b82f6" rx="3" />
-    <text x="125" y="375" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">Claude 3.5</text>
-    <text x="275" y="375" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">GPT-4</text>
-    <text x="425" y="375" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">Llama 3.3</text>
-    <text x="575" y="375" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">Gemini Pro</text>
-    <rect x="200" y="395" width="15" height="15" fill="#94a3b8" rx="2" />
-    <text x="220" y="407" font-size="12" fill="#475569">Raw Prompt</text>
-    <rect x="310" y="395" width="15" height="15" fill="#3b82f6" rx="2" />
-    <text x="330" y="407" font-size="12" fill="#475569">Improved Prompt</text>
-    <text x="125" y="185" text-anchor="middle" font-size="11" font-weight="bold" fill="#334155">55</text>
-    <text x="185" y="68" text-anchor="middle" font-size="11" font-weight="bold" fill="#2563eb">94</text>
-    <text x="275" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="#334155">50</text>
-    <text x="335" y="74" text-anchor="middle" font-size="11" font-weight="bold" fill="#2563eb">92</text>
-    <text x="425" y="215" text-anchor="middle" font-size="11" font-weight="bold" fill="#334155">45</text>
-    <text x="485" y="71" text-anchor="middle" font-size="11" font-weight="bold" fill="#2563eb">93</text>
-    <text x="575" y="230" text-anchor="middle" font-size="11" font-weight="bold" fill="#334155">40</text>
-    <text x="635" y="86" text-anchor="middle" font-size="11" font-weight="bold" fill="#2563eb">88</text>
-  </svg>
-</div>
+| Model | Raw Prompt | Improved Prompt |
+| :--- | :---: | :---: |
+| **Claude 3.5** | ███████████████████████████ 55 | ███████████████████████████████████████████████ 94 |
+| **GPT-4** | █████████████████████████ 50 | █████████████████████████████████████████████ 92 |
+| **Llama 3.3** | ████████████████████████ 45 | ███████████████████████████████████████████████ 93 |
+| **Gemini Pro** | █████████████████████ 40 | ███████████████████████████████████████████ 88 |
+
+> *(Bar length is proportional to the score out of 100; each `█` represents ~2 points.)*
 
 **Key takeaway:** The improved prompt consistently raises the baseline performance of every model by **+40 to +50 points**, with the highest absolute score (94/100) achieved on Claude 3.5—which aligns with the grade awarded in our fine-tuning suite (see next section).
+
+---
+
 ## Grading & Fine-Tuning
 
 Our prompt-engineering ruleset has been rigorously benchmarked against a diverse test suite of 200+ edge cases (covering ambiguous refactors, multi-step database migrations, and conflicting UI requirements).
