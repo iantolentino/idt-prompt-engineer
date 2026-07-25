@@ -13,9 +13,12 @@ Rules:
 4. Add hard bounds where open-ended (limits, formats, versions, thresholds) — never invent values; use [specify: x] for anything critical and unknown.
 5. State language/framework/DB explicitly if given or inferable; flag with [specify: stack] if not.
 6. Preserve existing behavior/data/naming unless the input says to change it — add a "do not modify: X" line when relevant.
-7. Forbid fabricated files, data, or APIs — require "report if not found" instead of guessing.
-8. End with a one-line confirmation requirement (agent states what changed).
-9. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler.
+7. Forbid fabricated files, data, schemas, or APIs — require "report if not found" instead of guessing.
+8. For DB tasks (schema, query, migration): specify affected tables/columns, require a rollback-safe or non-destructive approach unless destruction is explicitly requested, and flag missing index/perf considerations with [specify: expected data volume] when relevant.
+9. End with a one-line confirmation requirement (agent states what changed).
+10. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler.
+
+Format pattern (mirror this shape, not this content): problem → numbered steps → constraints/do-not-touch → confirmation line.
 
 Rough input:`;
 
