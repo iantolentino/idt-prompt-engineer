@@ -120,15 +120,13 @@ The following chart illustrates the average effectiveness score of the raw, unst
   </tr>
 </table>
 
-**Key takeaway:** The improved prompt consistently raises the baseline performance of every model by **+40 to +50 points**, with the highest absolute score (94/100) achieved on Claude 5 SOnnet — which aligns with the grade awarded in our fine-tuning suite (see next section).
+**Key takeaway:** The improved prompt consistently raises the baseline performance of every model by **+40 to +50 points**, with the highest absolute score (94/100) achieved on Claude 5 Sonnet — which aligns with the grade awarded in our fine-tuning suite (see next section).
 
 ---
 
-## Grading & Fine-Tuning
+## Grading
 
-Our prompt-engineering ruleset has been rigorously benchmarked against a diverse test suite of 200+ edge cases (covering ambiguous refactors, multi-step database migrations, and conflicting UI requirements).
-
-- **Current Grade:** **94/100** (awarded by Claude 3.5 Sonnet, evaluating the improved prompt's clarity, safety, and completeness).
+- **Current Grade:** **94/100** (awarded by Claude Sonnet 5, evaluating the improved prompt's clarity, safety, and completeness).
 - **Why 94?** Deductions are reserved for extremely rare cases where domain-specific acronyms or proprietary internal tooling names were not flagged for specification — a deliberate trade‑off to keep the system prompt generic and reusable.
 
 ## Free-tier limits
