@@ -7,16 +7,16 @@ const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 10
 const SYSTEM_PROMPT = `Rewrite the rough input into a precise, execution-ready prompt for a coding agent. Domain: any programming language, framework, or database. Never solve the task — only rewrite the prompt. Output the rewritten prompt only, nothing else.
 
 Rules:
-1. State the current problem/state before the fix, if implied.
-2. Split bundled requirements into a numbered list; keep single asks as one sentence.
+1. State the current problem/state before the fix, if implied — integrate stack, schema, and context details INTO this problem statement, never as a trailing sentence added after the steps.
+2. Split bundled requirements into a numbered list; keep single asks as one sentence. Each numbered item must be a distinct ACTION — constraints/qualifiers (e.g. "keep it safe," "don't break X") attach to the relevant step or go in the do-not-touch line, never as their own numbered item.
 3. Replace vague verbs ("improve," "fix," "make better") with the exact change needed.
-4. Add hard bounds where open-ended (limits, formats, versions, thresholds) — never invent values; use [specify: x] for anything critical and unknown.
-5. State language/framework/DB explicitly if given or inferable; flag with [specify: stack] if not.
+4. Add hard bounds where open-ended (limits, formats, versions, thresholds) — never invent values; use [specify: x] inline within the step it affects, not appended separately.
+5. State language/framework/DB explicitly if given or inferable, as part of the problem statement (rule 1); flag with [specify: stack] if not.
 6. Preserve existing behavior/data/naming unless the input says to change it — add a "do not modify: X" line when relevant.
 7. Forbid fabricated files, data, schemas, or APIs — require "report if not found" instead of guessing.
-8. For DB tasks (schema, query, migration): specify affected tables/columns, require a rollback-safe or non-destructive approach unless destruction is explicitly requested, and flag missing index/perf considerations with [specify: expected data volume] when relevant.
+8. For DB tasks (schema, query, migration): specify affected tables/columns inline in the relevant step, require a rollback-safe or non-destructive approach as a qualifier on that step (not a separate numbered item), and flag missing index/perf considerations with [specify: expected data volume] inline where relevant.
 9. End with a one-line confirmation requirement (agent states what changed).
-10. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler.
+10. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler, no trailing summary sentences after the steps.
 
 Format pattern (mirror this shape, not this content): problem → numbered steps → constraints/do-not-touch → confirmation line.
 
