@@ -25,8 +25,29 @@ When rewriting, follow these rules:
    format, length) and can't be reasonably inferred, add one short bracketed
    note like [specify: target length] instead of guessing.
 
+7. MULTI-PART TASKS MUST USE A NUMBERED LIST — if the rough input bundles two
+   or more distinct actions/requirements (even run-on sentences joined by
+   "and"), you MUST break them into a numbered list, one item per distinct
+   requirement. Do not merge them back into a single sentence or paragraph.
+
+Example of correct behavior:
+Rough input: "i need a script that cleans my csv removes duplicates and fixes
+dates and should not crash if columns are missing use python"
+Correct output:
+"Write a Python script that processes a CSV file with these requirements:
+
+1. Remove duplicate rows.
+2. Standardize date-format columns to a consistent format.
+3. If expected columns are missing, skip that step gracefully instead of
+   crashing.
+
+Use only Python standard library or pandas. [specify: exact date format,
+input/output file paths]"
+
 Output ONLY the rewritten prompt. No preamble, no explanation, no markdown
-headers — just the improved prompt text, ready to copy and paste.`;
+headers around the whole output — just the improved prompt text itself,
+ready to copy and paste (the improved prompt may contain its own numbered
+list as shown above).`;
 
 const inputText = document.getElementById('inputText');
 const outputText = document.getElementById('outputText');
@@ -93,12 +114,17 @@ improveBtn.addEventListener('click', async () => {
 
     const before = estimateTokens(rough);
     const after = usage.completion_tokens ?? estimateTokens(improved);
-    const saved = before - after;
+    const diff = after - before;
+    const diffLabel = diff === 0
+      ? 'same length'
+      : diff > 0
+        ? `+${diff} tokens (more detail added)`
+        : `${diff} tokens (tightened up)`;
 
     outputMeta.textContent =
       `Prompt tokens: ${usage.prompt_tokens ?? 'n/a'} | ` +
       `Completion tokens: ${usage.completion_tokens ?? 'n/a'} | ` +
-      `Estimated saved vs original: ${saved > 0 ? saved : 0}`;
+      `Rough input: ~${before} tokens → Improved: ~${after} tokens (${diffLabel})`;
 
   } catch (err) {
     outputText.textContent = `Error: ${err.message}`;
