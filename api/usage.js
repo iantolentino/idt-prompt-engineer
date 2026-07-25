@@ -1,4 +1,6 @@
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 
 const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
 
@@ -8,10 +10,10 @@ export default async function handler(req, res) {
   const dayKey = `usage:day:${Math.floor(now / 86400000)}`;
 
   const [minReq, minTok, dayReq, dayTok] = await Promise.all([
-    kv.get(`${minuteKey}:req`) || 0,
-    kv.get(`${minuteKey}:tok`) || 0,
-    kv.get(`${dayKey}:req`) || 0,
-    kv.get(`${dayKey}:tok`) || 0,
+    redis.get(`${minuteKey}:req`) || 0,
+    redis.get(`${minuteKey}:tok`) || 0,
+    redis.get(`${dayKey}:req`) || 0,
+    redis.get(`${dayKey}:tok`) || 0,
   ]);
 
   return res.status(200).json({
