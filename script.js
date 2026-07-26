@@ -5,6 +5,7 @@ const inputMeta = document.getElementById('inputMeta');
 const outputMeta = document.getElementById('outputMeta');
 const usageBar = document.getElementById('usageBar');
 const copyBtn = document.getElementById('copyBtn');
+const clearBtn = document.getElementById('clearBtn');
 
 function estimateTokens(text) {
   if (!text) return 0;
@@ -100,6 +101,15 @@ copyBtn.addEventListener('click', async () => {
   } catch {
     alert('Could not copy automatically — select the text manually.');
   }
+});
+
+clearBtn.addEventListener('click', () => {
+  inputText.value = '';
+  inputMeta.textContent = '~0 tokens (estimate)';
+  outputText.textContent = '';
+  outputMeta.textContent = '';
+  document.getElementById('outputBadge')?.classList.remove('active');
+  inputText.focus();
 });
 
 refreshUsage();
