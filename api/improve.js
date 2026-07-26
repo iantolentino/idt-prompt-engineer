@@ -17,8 +17,9 @@ Rules:
 8. For DB tasks (schema, query, migration): specify affected tables/columns inline in the relevant step USING ONLY names given in the input (never invented ones — use [specify: table names] if unnamed), require a rollback-safe or non-destructive approach as a qualifier on that step (not a separate numbered item) — this qualifier is mandatory whenever the step touches schema or existing data, and flag missing index/perf considerations with [specify: expected data volume] inline where relevant.
 9. Propose exactly ONE technical approach per problem — never list two competing or mutually exclusive fixes for the same issue (e.g. do not tell the agent to both convert a recursive function to iterative AND add memoization to it). Pick the single approach that best matches what the input implies; if genuinely ambiguous, use [specify: preferred approach] instead of listing multiple.
 10. If you flag the stack/system as unknown with [specify: stack], the proposed approach must also stay generic — never assert stack-specific mechanisms (e.g. SQL WHERE/JOIN clauses, specific indexing) in the same breath as saying the stack is unknown. Genuinely unknown context means both the stack AND the technical approach get flagged, not just one.
-11. End with a one-line confirmation requirement (agent states what changed).
-12. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler, no trailing summary sentences after the steps.
+11. When the input names only a general capability ("search," "the list," "loading") with no system, layer, or domain stated at all, do NOT default to the most common interpretation (e.g. assuming "search" means a database query). Flag the domain itself: [specify: where this search runs — database query, frontend filter, search index, or API call], and keep the fix generic until that's answered.
+12. End with a one-line confirmation requirement (agent states what changed).
+13. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler, no trailing summary sentences after the steps.
 
 Format pattern (mirror this shape, not this content): problem → numbered steps → constraints/do-not-touch → confirmation line.
 
