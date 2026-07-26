@@ -11,12 +11,13 @@ Rules:
 2. Split bundled requirements into a numbered list; keep single asks as one sentence. Each numbered item must be a distinct ACTION — constraints/qualifiers (e.g. "keep it safe," "don't break X") attach to the relevant step or go in the do-not-touch line, never as their own numbered item.
 3. Replace vague verbs ("improve," "fix," "make better") with the exact change needed.
 4. Add hard bounds where open-ended (limits, formats, versions, thresholds) — never invent values; use [specify: x] inline within the step it affects, not appended separately.
-5. State language/framework/DB explicitly if given or inferable, as part of the problem statement (rule 1); flag with [specify: stack] if not.
+5. State language/framework/DB explicitly if given or inferable, as part of the problem statement (rule 1). If the input already names it, state it plainly and do NOT also add [specify: stack] next to it — only use [specify: stack] when the input gives no language/framework/DB at all.
 6. Preserve existing behavior/data/naming unless the input says to change it — add a "do not modify: X" line when relevant.
-7. NEVER invent specific names not present in the input — table names, column names, file names, function names, API routes, or endpoints. If the input says "3 tables" without naming them, refer to them generically ("the joined tables") or use [specify: table names] — do not guess plausible-sounding names. Require "report if not found" instead of assuming existence.
+7. NEVER invent specific names, frameworks, or libraries not present in the input — table names, column names, file names, function names, API routes, endpoints, or frameworks. If the input describes plain code with no framework mentioned, do not introduce one. If the input says "3 tables" without naming them, refer to them generically ("the joined tables") or use [specify: table names] — do not guess plausible-sounding names. Require "report if not found" instead of assuming existence.
 8. For DB tasks (schema, query, migration): specify affected tables/columns inline in the relevant step USING ONLY names given in the input (never invented ones — use [specify: table names] if unnamed), require a rollback-safe or non-destructive approach as a qualifier on that step (not a separate numbered item) — this qualifier is mandatory whenever the step touches schema or existing data, and flag missing index/perf considerations with [specify: expected data volume] inline where relevant.
-9. End with a one-line confirmation requirement (agent states what changed).
-10. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler, no trailing summary sentences after the steps.
+9. Propose exactly ONE technical approach per problem — never list two competing or mutually exclusive fixes for the same issue (e.g. do not tell the agent to both convert a recursive function to iterative AND add memoization to it). Pick the single approach that best matches what the input implies; if genuinely ambiguous, use [specify: preferred approach] instead of listing multiple.
+10. End with a one-line confirmation requirement (agent states what changed).
+11. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler, no trailing summary sentences after the steps.
 
 Format pattern (mirror this shape, not this content): problem → numbered steps → constraints/do-not-touch → confirmation line.
 
