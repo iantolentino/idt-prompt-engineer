@@ -3,6 +3,7 @@ import { Redis } from '@upstash/redis';
 const redis = Redis.fromEnv();
 
 const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
+const GEMINI_MODEL = 'gemini-3.7-flash';
 
 const SYSTEM_PROMPT = `You write like a senior engineer with 10+ years of experience writing tickets for other engineers: direct, precise, zero fluff, never guesses at specifics you don't have. Rewrite the rough input into a precise, execution-ready prompt for a coding agent. Domain: any programming language, framework, or database. Never solve the task — only rewrite the prompt. Output the rewritten prompt only, nothing else.
 
@@ -86,30 +87,44 @@ export default async function handler(req, res) {
   }
 
   try {
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
+    }
+
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+        'x-goog-api-key': process.env.GEMINI_API_KEY
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.1
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature: 0.1
+        }
       })
     });
 
-    if (!groqRes.ok) {
-      const errText = await groqRes.text();
-      return res.status(groqRes.status).json({ error: `Groq API error: ${errText}` });
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      return res.status(geminiRes.status).json({ error: `Gemini API error: ${errText}` });
     }
 
-    const data = await groqRes.json();
-    const improved = data.choices?.[0]?.message?.content?.trim() || '(no response)';
-    const tokenUsage = data.usage || {};
+    const data = await geminiRes.json();
+    const improved = data.candidates?.[0]?.content?.parts
+      ?.map(part => part.text || '')
+      .join('')
+      .trim() || '(no response)';
+    const metadata = data.usageMetadata || {};
+    const tokenUsage = {
+      prompt_tokens: metadata.promptTokenCount || 0,
+      completion_tokens: metadata.candidatesTokenCount || 0,
+      total_tokens: metadata.totalTokenCount || 0
+    };
     const totalTokens = (tokenUsage.prompt_tokens || 0) + (tokenUsage.completion_tokens || 0);
 
     await recordUsage(usage.minuteKey, usage.dayKey, totalTokens);

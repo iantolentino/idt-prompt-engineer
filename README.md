@@ -48,8 +48,12 @@ Overall: ~90-97% reliable on concrete, well-described requests. Vague one-liners
 
 - Frontend: static HTML, CSS, vanilla JavaScript
 - Backend: Vercel serverless functions
-- Model: Llama 3.3 70B via Groq
+- Model: Gemini 3.7 Flash via Google Gemini API
 - Usage tracking: Upstash Redis, persists across sessions and devices
+
+## Environment variables
+
+Set `GEMINI_API_KEY`, `UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN` in Vercel. Use `.env.example` as the local template; never commit the real values.
 
 ## Project structure
 
@@ -57,11 +61,11 @@ Overall: ~90-97% reliable on concrete, well-described requests. Vague one-liners
 index.html      the two-panel interface
 script.js       handles the fetch calls and renders results
 api/
-  improve.js    receives the rough prompt, applies the rewriting rules, calls Groq, enforces usage limits
-  usage.js      returns current usage counts without making a Groq call
+  improve.js    receives the rough prompt, applies the rewriting rules, calls Gemini, enforces usage limits
+  usage.js      returns current usage counts without making a model API call
 package.json    declares the Redis client dependency
 ```
 
 ## Notes on the token counts shown
 
-The input panel shows a rough estimate of the pasted text's token count. The output panel shows the real prompt and completion token counts from Groq, plus the difference between rough input and improved prompt. An improved prompt is usually longer than the original since it adds the structure that was missing — that's expected, not a failure of efficiency.
+The input panel shows a rough estimate of the pasted text's token count. The output panel shows the real prompt and completion token counts from Gemini, plus the difference between rough input and improved prompt. An improved prompt is usually longer than the original since it adds the structure that was missing — that's expected, not a failure of efficiency.
