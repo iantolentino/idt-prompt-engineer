@@ -75,10 +75,20 @@ improveBtn.addEventListener('click', async () => {
         ? `+${diff} tokens (more detail added)`
         : `${diff} tokens (tightened up)`;
 
-    outputMeta.textContent =
+    // Build output meta with token info and grade
+    let metaText = 
       `Prompt tokens: ${data.tokenUsage?.prompt_tokens ?? 'n/a'} | ` +
       `Completion tokens: ${data.tokenUsage?.completion_tokens ?? 'n/a'} | ` +
       `Rough input: ~${before} tokens → Improved: ~${after} tokens (${diffLabel})`;
+
+    if (data.grade) {
+      const { total, feedback } = data.grade;
+      metaText += ` | Quality Score: ${total.toFixed(1)}/100`;
+      // Store feedback for potential tooltip/expandable section
+      outputText.dataset.feedback = feedback || '';
+    }
+
+    outputMeta.textContent = metaText;
 
     renderUsage(data.usage, data.limits);
 
