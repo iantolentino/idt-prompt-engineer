@@ -81,7 +81,7 @@ improveBtn.addEventListener('click', async () => {
       `Completion tokens: ${data.tokenUsage?.completion_tokens ?? 'n/a'} | ` +
       `Rough input: ~${before} tokens → Improved: ~${after} tokens (${diffLabel})`;
 
-    if (data.grade) {
+    if (data && data.grade && data.grade.total !== undefined) {
       const { total, feedback } = data.grade;
       metaText += ` | Quality Score: ${total.toFixed(1)}/100`;
       // Store feedback for potential tooltip/expandable section
@@ -90,7 +90,7 @@ improveBtn.addEventListener('click', async () => {
 
     outputMeta.textContent = metaText;
 
-    renderUsage(data.usage, data.limits);
+    if (data && data.usage && data.limits) renderUsage(data.usage, data.limits);
 
   } catch (err) {
     outputText.textContent = `Error: ${err.message}`;
