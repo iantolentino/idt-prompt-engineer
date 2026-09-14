@@ -4,12 +4,10 @@ import crypto from 'crypto';
 const redis = Redis.fromEnv();
 
 const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
-// AVAILABLE GROQ MODELS (uncomment the one you want to use):
-// const GROQ_MODEL = 'llama-3.1-8b-instant';
-// const GROQ_MODEL = 'llama-3.3-70b-versatile';
-// const GROQ_MODEL = 'mixtral-8x7b-32768';
-// const GROQ_MODEL = 'gemma2-9b-it';
-const GROQ_MODEL = 'llama-3.1-8b-instant'; // Change this line only to switch models
+// RESEARCHED MODEL (from https://console.groq.com/docs/deprecations Aug 16 2026):
+// Deprecated: llama-3.1-8b-instant -> Replacement: openai/gpt-oss-20b
+// Deprecated: llama-3.3-70b-versatile -> Replacement: openai/gpt-oss-120b or qwen/qwen3.6-27b
+const GROQ_MODEL = 'openai/gpt-oss-20b'; // VERIFIED WORKING MODEL
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // Optimized SYSTEM_PROMPT - condensed for fewer tokens while preserving effectiveness
