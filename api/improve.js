@@ -4,7 +4,12 @@ import crypto from 'crypto';
 const redis = Redis.fromEnv();
 
 const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
-const GROQ_MODEL = 'llama-3.1-8b-instant';
+// AVAILABLE GROQ MODELS (uncomment the one you want to use):
+// const GROQ_MODEL = 'llama-3.1-8b-instant';
+// const GROQ_MODEL = 'llama-3.3-70b-versatile';
+// const GROQ_MODEL = 'mixtral-8x7b-32768';
+// const GROQ_MODEL = 'gemma2-9b-it';
+const GROQ_MODEL = 'llama-3.1-8b-instant'; // Change this line only to switch models
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // Optimized SYSTEM_PROMPT - condensed for fewer tokens while preserving effectiveness
