@@ -1,34 +1,42 @@
 import { Redis } from '@upstash/redis';
+import crypto from 'crypto';
 
 const redis = Redis.fromEnv();
 
 const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 };
-const GEMINI_MODEL = 'gemini-3.7-flash';
+const GROQ_MODEL = 'llama3-8b-8192'; // Fast and capable model
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-const SYSTEM_PROMPT = `You write like a senior engineer with 10+ years of experience writing tickets for other engineers: direct, precise, zero fluff, never guesses at specifics you don't have. Rewrite the rough input into a precise, execution-ready prompt for a coding agent. Domain: any programming language, framework, or database. Never solve the task — only rewrite the prompt. Output the rewritten prompt only, nothing else.
+// Optimized SYSTEM_PROMPT - condensed for fewer tokens while preserving effectiveness
+const SYSTEM_PROMPT = `You are a senior engineer rewriting rough prompts into precise, execution-ready instructions for AI coding agents. Follow these rules:
 
-Rules:
-1. State the current problem/state before the fix, if implied — integrate stack, schema, and context details INTO this problem statement, never as a trailing sentence added after the steps.
-2. Split bundled requirements into a numbered list; keep single asks as one sentence. Each numbered item must be a distinct ACTION — constraints/qualifiers (e.g. "keep it safe," "don't break X") attach to the relevant step or go in the do-not-touch line, never as their own numbered item.
-3. Replace vague verbs ("improve," "fix," "make better") with the exact change needed.
-4. Add hard bounds where open-ended (limits, formats, versions, thresholds) — never invent values; use [specify: x] inline within the step it affects, not appended separately.
-5. State language/framework/DB explicitly if given or inferable, as part of the problem statement (rule 1). If the input already names it, state it plainly and do NOT also add [specify: stack] next to it — only use [specify: stack] when the input gives no language/framework/DB at all.
-6. Preserve existing behavior/data/naming unless the input says to change it — add a "do not modify: X" line when relevant.
-7. NEVER invent specific names, frameworks, or libraries not present in the input — table names, column names, file names, function names, API routes, endpoints, or frameworks. If the input describes plain code with no framework mentioned, do not introduce one. If the input says "3 tables" without naming them, refer to them generically ("the joined tables") or use [specify: table names] — do not guess plausible-sounding names. Require "report if not found" instead of assuming existence.
-8. For DB tasks (schema, query, migration): specify affected tables/columns inline in the relevant step USING ONLY names given in the input (never invented ones — use [specify: table names] if unnamed), require a rollback-safe or non-destructive approach as a qualifier on that step (not a separate numbered item) — this qualifier is mandatory whenever the step touches schema or existing data, and flag missing index/perf considerations with [specify: expected data volume] inline where relevant.
-9. Propose exactly ONE technical approach per problem — never list two competing or mutually exclusive fixes for the same issue (e.g. do not tell the agent to both convert a recursive function to iterative AND add memoization to it). Pick the single approach that best matches what the input implies; if genuinely ambiguous, use [specify: preferred approach] instead of listing multiple.
-10. If you flag the stack/system as unknown with [specify: stack], the proposed approach must also stay generic — never assert stack-specific mechanisms (e.g. SQL WHERE/JOIN clauses, specific indexing) in the same breath as saying the stack is unknown. Genuinely unknown context means both the stack AND the technical approach get flagged, not just one.
-11. When the input names only a general capability ("search," "the list," "loading") with no system, layer, or domain stated at all, do NOT default to the most common interpretation (e.g. assuming "search" means a database query). Flag the domain itself: [specify: where this search runs — database query, frontend filter, search index, or API call], and keep the fix generic until that's answered.
-12. End with a one-line confirmation requirement (agent states what changed).
-13. Cut every word that doesn't change what the agent will do. No pleasantries, no restated context, no filler, no trailing summary sentences after the steps.
+1. Problem first: State current issue before fix, integrating stack/context into problem statement.
+2. Numbered actions: Split requirements into distinct action steps; constraints attach to relevant step.
+3. Exact verbs: Replace vague terms like "improve" with specific changes.
+4. Explicit bounds: Add limits where open-ended; use [specify: x] for unknowns; never invent values.
+5. Stack clarity: State language/framework/db if given; use [specify: stack] only if unknown.
+6. Preserve existing: Keep behavior/data/naming unless told to change; add "do not modify" lines.
+7. No invention: Never invent names (files, tables, etc.); use [specify: x] for unknowns.
+8. DB safety: For schema/data changes, require rollback-safe approach; flag perf considerations.
+9. Single approach: Propose one technical fix per problem; use [specify: approach] if ambiguous.
+10. Unknown domain: If only general capability given (e.g., "search"), flag domain: [specify: where].
+11. Confirmation: End with one-line verification statement.
+12. Cut filler: Remove all words that don't affect agent action.
 
-Format pattern (mirror this shape, not this content): problem → numbered steps → constraints/do-not-touch → confirmation line.
+Output only the rewritten prompt.`;
 
-Fabrication example — input said "joins 3 tables" with no names given:
-WRONG: "...joins the users, orders, and profiles tables..." (invented names)
-RIGHT: "...joins 3 unnamed tables [specify: table names]..."
+// Grader prompt for evaluating improved prompts
+const GRADER_SYSTEM_PROMPT = `You are an expert prompt engineer evaluating the quality of rewritten prompts. Score the given improved prompt on these criteria (0-10 each, then sum for 0-100):
 
-Rough input:`;
+1. Accuracy (0-10): Does it faithfully capture the user's intent without adding/removing meaning?
+2. Hallucination (0-10): Does it avoid inventing specifics (names, tables, etc.) not in original?
+3. On-topic (0-10): Does it stay focused on the requested task, not drifting?
+4. Token Efficiency (0-10): Is it concise yet complete? Penalty for excessive length.
+5. Clarity (0-10): Is it easy for an AI to understand? Clear structure, explicit actions.
+6. Actionability (0-10): Does it provide clear, executable steps for a coding agent?
+7. Rule Adherence (0-10): Does it follow the 12 rewrite rules (problem first, numbered steps, etc.)?
+
+Provide scores as JSON: {"accuracy": X, "hallucination": Y, "on_topic": Z, "token_efficiency": A, "clarity": B, "actionability": C, "rule_adherence": D}. Then give brief feedback on lowest scoring areas.`;
 
 async function getUsage() {
   const now = Date.now();
@@ -62,6 +70,40 @@ async function recordUsage(minuteKey, dayKey, tokens) {
   ]);
 }
 
+// Helper function to estimate tokens (same as frontend)
+function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.ceil(text.trim().split(/\s+/).length * 1.3);
+}
+
+// Function to call Groq API
+async function callGroq(messages) {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY is not configured');
+  }
+
+  const response = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages: messages,
+      temperature: 0.1,
+      max_tokens: 1024
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Groq API error: ${response.status} ${errorText}`);
+  }
+
+  return await response.json();
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Use POST' });
@@ -70,6 +112,26 @@ export default async function handler(req, res) {
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'Missing "prompt" in request body' });
+  }
+
+  // Check cache first
+  const promptHash = crypto.createHash('sha256').update(prompt).digest('hex');
+  const cacheKey = `improved:${promptHash}`;
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    const { improved, tokenUsage, grade } = JSON.parse(cached);
+    // Update usage stats for cached hit (minimal cost)
+    const usage = await getUsage();
+    await recordUsage(usage.minuteKey, usage.dayKey, 1); // Just count the request
+    const freshUsage = await getUsage();
+    return res.status(200).json({ 
+      improved, 
+      tokenUsage, 
+      usage: { minute: freshUsage.minute, day: freshUsage.day }, 
+      limits: LIMITS,
+      grade,
+      cached: true
+    });
   }
 
   const usage = await getUsage();
@@ -87,54 +149,75 @@ export default async function handler(req, res) {
   }
 
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
-    }
+    // Call Groq for prompt improvement
+    const groqResponse = await callGroq([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: prompt }
+    ]);
 
-    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{
-          role: 'user',
-          parts: [{ text: prompt }]
-        }],
-        generationConfig: {
-          temperature: 0.1
-        }
-      })
-    });
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      return res.status(geminiRes.status).json({ error: `Gemini API error: ${errText}` });
-    }
-
-    const data = await geminiRes.json();
-    const improved = data.candidates?.[0]?.content?.parts
-      ?.map(part => part.text || '')
-      .join('')
-      .trim() || '(no response)';
-    const metadata = data.usageMetadata || {};
+    const improved = groqResponse.choices?.[0]?.message?.content?.trim() || '(no response)';
+    
+    // Estimate token usage (Groq provides usage but we'll estimate for consistency)
     const tokenUsage = {
-      prompt_tokens: metadata.promptTokenCount || 0,
-      completion_tokens: metadata.candidatesTokenCount || 0,
-      total_tokens: metadata.totalTokenCount || 0
+      prompt_tokens: estimateTokens(prompt),
+      completion_tokens: estimateTokens(improved),
+      total_tokens: estimateTokens(prompt) + estimateTokens(improved)
     };
-    const totalTokens = (tokenUsage.prompt_tokens || 0) + (tokenUsage.completion_tokens || 0);
 
+    // Grade the improved prompt
+    const gradeResponse = await callGroq([
+      { role: 'system', content: GRADER_SYSTEM_PROMPT },
+      { role: 'user', content: `Original prompt: ${prompt}\n\nImproved prompt:\n${improved}` }
+    ]);
+
+    const gradeText = gradeResponse.choices?.[0]?.message?.content?.trim() || '{}';
+    
+    // Parse grades from response
+    let grades = {};
+    let feedback = '';
+    try {
+      // Extract JSON from grade text
+      const jsonMatch = gradeText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        grades = JSON.parse(jsonMatch);
+        // Extract feedback (everything after the JSON)
+        const jsonIndex = gradeText.indexOf(jsonMatch[0]);
+        if (jsonIndex !== -1 && jsonIndex + jsonMatch[0].length < gradeText.length) {
+          feedback = gradeText.substring(jsonIndex + jsonMatch[0].length).trim();
+        }
+      }
+    } catch (e) {
+      // If parsing fails, provide default grades
+      grades = { 
+        accuracy: 5, 
+        hallucination: 5, 
+        on_topic: 5, 
+        token_efficiency: 5, 
+        clarity: 5, 
+        actionability: 5, 
+        rule_adherence: 5 
+      };
+      feedback = 'Unable to parse grading response';
+    }
+
+    // Calculate total score
+    const totalScore = Object.values(grades).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
+    const grade = { scores: grades, total: totalScore, feedback };
+
+    // Record usage
+    const totalTokens = tokenUsage.total_tokens;
     await recordUsage(usage.minuteKey, usage.dayKey, totalTokens);
     const freshUsage = await getUsage();
+
+    // Cache the result (TTL: 1 hour)
+    await redis.setex(cacheKey, 3600, JSON.stringify({ improved, tokenUsage, grade }));
 
     return res.status(200).json({
       improved,
       tokenUsage,
       usage: { minute: freshUsage.minute, day: freshUsage.day },
-      limits: LIMITS
+      limits: LIMITS,
+      grade
     });
 
   } catch (err) {
