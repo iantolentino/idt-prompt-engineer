@@ -1,4 +1,3 @@
-````javascript
 const { Redis } = require('@upstash/redis');
 const crypto = require('crypto');
 
