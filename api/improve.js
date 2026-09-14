@@ -1,8 +1,14 @@
-import { Redis } from '@upstash/redis';
-import crypto from 'crypto';
+const { Redis } = require('@upstash/redis'); const crypto = require('crypto'); const redis = Redis.fromEnv(); const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'; const GROQ_MODEL = 'openai/gpt-oss-20b'; // Application rate limits. // These are usage-protection limits, not limits on the length of an individual prompt. const LIMITS = { reqPerMin: 30, reqPerDay: 1000, tokPerMin: 12000, tokPerDay: 100000 }; const SYSTEM_PROMPT = ` You are an expert prompt engineer and senior software/AI engineering mentor. Your job is to transform the user's raw prompt into a significantly better prompt that another AI can execute accurately. IMPORTANT: - Preserve the user's actual intent. - Improve the prompt; do not merely rephrase it. - Do not invent technologies, requirements, features, architecture, APIs, databases, services, or implementation details that the user did not request. - When an important technical decision is unknown, explicitly mark it as [specify: X] instead of guessing. - You may add useful constraints when they directly improve correctness, safety, or execution. - Do not remove important requirements just to make the prompt shorter. - Do not add unnecessary complexity. - Make the resulting prompt actionable and unambiguous. - If the user is asking for software development, clearly separate the goal, requirements, constraints, expected behavior, and deliverables where useful. - Preserve existing technology choices when the user explicitly provided them. - If no technology stack was specified, do not silently choose one. - If the user wants to learn, make the AI act as both an expert implementer and a technical mentor. - The improved prompt should tell the AI what to build/do, what decisions need to be explained, and what should be delivered. - For security-sensitive or destructive operations, require confirmation before irreversible actions. - Do not claim that something exists, has been tested, deployed, or verified unless the user explicitly said so. - Avoid filler, repetition, marketing language, and unnecessary explanations. OUTPUT FORMAT: - Return ONLY the improved prompt. - Do not explain what you changed. - Do not wrap the prompt in Markdown code fences. - Do not use asterisks for bold or emphasis. - Do not use decorative Markdown. - Do not add a "Here's your improved prompt" introduction. - Numbered lists are allowed when they make instructions clearer. - Use headings only when they genuinely improve organization. - Do not impose an arbitrary word, character, or sentence limit. - Use as much text as necessary to fully specify the user's request. - At the same time, remove unnecessary verbosity and repetition. - The final prompt should be complete rather than artificially short. `; const GRADER_SYSTEM_PROMPT = ` You are a strict prompt-quality evaluator. Evaluate the improved prompt against the original prompt. Score each criterion from 0 to 10: 1. Accuracy Does the improved prompt correctly represent the user's request? 2. Hallucination Does it avoid inventing unsupported technologies, requirements, facts, or assumptions? 10 = no problematic invention. 3. On-topic Does it remain focused on the user's actual goal? 4. Token Efficiency Does it remove unnecessary repetition and filler while retaining useful detail? A longer prompt is NOT automatically inefficient if the extra detail is useful. 5. Clarity Are the instructions unambiguous and easy for another AI to follow? 6. Actionability Can another AI actually execute the request from the improved prompt? 7. Rule Adherence Does the prompt follow the prompt-engineering rules, including preserving intent, avoiding unsupported assumptions, and handling unknowns appropriately? Return ONLY valid JSON in this exact structure: { "scores": { "accuracy": 0, "hallucination": 0, "onTopic": 0, "tokenEfficiency": 0, "clarity": 0, "actionability": 0, "ruleAdherence": 0 }, "feedback": "Brief explanation of the main strengths and weaknesses." } Do not return Markdown. Do not wrap the JSON in code fences. `; function hashPrompt(prompt) { return crypto .createHash('sha256') .update(prompt) .digest('hex'); } function estimateTokens(text) { if (!text) return 0; // Approximate token count. // Actual token usage is taken from the Groq API when available. return Math.ceil(text.length / 4); } async function getUsage(ip) { const minuteKey = `usage:min:${ip}`; const dayKey = `usage:day:${ip}`; const tokenMinuteKey = `usage:tok:min:${ip}`; const tokenDayKey = `usage:tok:day:${ip}`; const [reqMin, reqDay, tokMin, tokDay] = await Promise.all([ redis.get(minuteKey), redis.get(dayKey), redis.get(tokenMinuteKey), redis.get(tokenDayKey) ]); return { reqMin: Number(reqMin || 0), reqDay: Number(reqDay || 0), tokMin: Number(tokMin || 0), tokDay: Number(tokDay || 0) }; } async function recordUsage(ip, tokens) { const minuteKey = `usage:min:${ip}`; const dayKey = `usage:day:${ip}`; const tokenMinuteKey = `usage:tok:min:${ip}`; const tokenDayKey = `usage:tok:day:${ip}`; await Promise.all([ redis.incr(minuteKey), redis.incr(dayKey), redis.incrby(tokenMinuteKey, tokens), redis.incrby(tokenDayKey, tokens) ]); await Promise.all([ redis.expire(minuteKey, 60), redis.expire(dayKey, 86400), redis.expire(tokenMinuteKey, 60), redis.expire(tokenDayKey, 86400) ]); } async function callGroq(messages) { const response = await fetch(GROQ_API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}` }, body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, // This is the model output allowance. // There is no application-level character/word limit. max_completion_tokens: 8000 }) }); const data = await response.json(); if (!response.ok) { const message = data?.error?.message || `Groq API request failed with status ${response.status}`; throw new Error(message); } const choice = data?.choices?.[0]; if (!choice) { throw new Error('Groq returned no completion.'); } return { content: choice.message?.content?.trim() || '', usage: data.usage || {} }; } function cleanImprovedPrompt(text) { if (!text) return ''; let cleaned = text.trim(); // Remove accidental surrounding Markdown code fences. cleaned = cleaned.replace(/^```(?:text|markdown)?\s*/i, ''); cleaned = cleaned.replace(/\s*```$/i, ''); // Remove a common introductory phrase if the model ignores the // "return only the prompt" instruction. cleaned = cleaned.replace( /^(here(?:'s| is) (?:the )?(?:improved|optimized|refined) prompt:)\s*/i, '' ); return cleaned.trim(); } function clampScore(value) { const number = Number(value); if (!Number.isFinite(number)) { return 0; } return Math.max(0, Math.min(10, number)); } function calculateTotalScore(scores) { const values = [ scores.accuracy, scores.hallucination, scores.onTopic, scores.tokenEfficiency, scores.clarity, scores.actionability, scores.ruleAdherence ].map(clampScore); const rawScore = values.reduce((sum, value) => sum + value, 0); // 7 criteria × 10 = 70 maximum. // Normalize to a 0–100 grade. return Math.round((rawScore / 70) * 100); } function parseGraderResponse(content) { if (!content) { throw new Error('Grader returned an empty response.'); } let cleaned = content.trim(); // Remove Markdown code fences if the grader accidentally adds them. cleaned = cleaned.replace(/^```json\s*/i, ''); cleaned = cleaned.replace(/^```\s*/i, ''); cleaned = cleaned.replace(/\s*```$/i, ''); let parsed; try { parsed = JSON.parse(cleaned); } catch (error) { // Try to extract the first JSON object. const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}'); if (start === -1 || end === -1 || end <= start) { throw new Error('Unable to parse grader JSON.'); } parsed = JSON.parse(cleaned.slice(start, end + 1)); } const rawScores = parsed.scores || {}; const scores = { accuracy: clampScore(rawScores.accuracy), hallucination: clampScore(rawScores.hallucination), onTopic: clampScore(rawScores.onTopic), tokenEfficiency: clampScore(rawScores.tokenEfficiency), clarity: clampScore(rawScores.clarity), actionability: clampScore(rawScores.actionability), ruleAdherence: clampScore(rawScores.ruleAdherence) }; return { scores, totalScore: calculateTotalScore(scores), feedback: typeof parsed.feedback === 'string' ? parsed.feedback.trim() : '' }; } export default async function handler(req, res) { if (req.method !== 'POST') { return res.status(405).json({ error: 'Method not allowed.' }); } try { if (!process.env.GROQ_API_KEY) { return res.status(500).json({ error: 'GROQ_API_KEY is not configured.' }); } const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.headers['x-real-ip'] || 'unknown'; const originalPrompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : ''; if (!originalPrompt) { return res.status(400).json({ error: 'Prompt is required.' }); } const usage = await getUsage(ip); if (usage.reqMin >= LIMITS.reqPerMin) { return res.status(429).json({ error: 'Too many requests. Please try again in a minute.' }); } if (usage.reqDay >= LIMITS.reqPerDay) { return res.status(429).json({ error: 'Daily request limit reached.' }); } if (usage.tokMin >= LIMITS.tokPerMin) { return res.status(429).json({ error: 'Minute token limit reached. Please try again shortly.' }); } if (usage.tokDay >= LIMITS.tokPerDay) { return res.status(429).json({ error: 'Daily token limit reached.' }); } const promptHash = hashPrompt(originalPrompt); const cacheKey = `improve:${promptHash}`; /* * Upstash Redis automatically serializes/deserializes JSON-compatible * values. Therefore redis.get() may return an object directly. */ const cached = await redis.get(cacheKey); if (cached) { let cacheData = cached; // Compatibility with any older cache entries that were stored // as JSON strings. if (typeof cacheData === 'string') { try { cacheData = JSON.parse(cacheData); } catch { cacheData = null; } } if ( cacheData && typeof cacheData === 'object' && typeof cacheData.improved === 'string' ) { await recordUsage( ip, Number(cacheData.tokenUsage?.totalTokens || 1) ); return res.status(200).json({ improved: cacheData.improved, tokenUsage: cacheData.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, grade: cacheData.grade || null, cached: true }); } } /* * STEP 1: * Improve the user's prompt. */ const improvementResult = await callGroq([ { role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: originalPrompt } ]); const improved = cleanImprovedPrompt(improvementResult.content); if (!improved) { throw new Error('Groq returned an empty improved prompt.'); } /* * STEP 2: * Grade the improved prompt against the original. */ const graderResult = await callGroq([ { role: 'system', content: GRADER_SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify({ originalPrompt, improvedPrompt: improved }) } ]); const grade = parseGraderResponse(graderResult.content); /* * Prefer actual Groq token usage. * Fall back to estimation if the API does not provide usage. */ const improvementPromptTokens = Number(improvementResult.usage?.prompt_tokens) || estimateTokens(originalPrompt); const improvementCompletionTokens = Number(improvementResult.usage?.completion_tokens) || estimateTokens(improved); const gradingPromptTokens = Number(graderResult.usage?.prompt_tokens) || estimateTokens( JSON.stringify({ originalPrompt, improvedPrompt: improved }) ); const gradingCompletionTokens = Number(graderResult.usage?.completion_tokens) || estimateTokens(graderResult.content); const promptTokens = improvementPromptTokens + gradingPromptTokens; const completionTokens = improvementCompletionTokens + gradingCompletionTokens; const totalTokens = Number(improvementResult.usage?.total_tokens || 0) + Number(graderResult.usage?.total_tokens || 0) || promptTokens + completionTokens; const tokenUsage = { promptTokens, completionTokens, totalTokens }; /* * Record the actual estimated/returned usage. */ await recordUsage(ip, totalTokens); /* * Store the object directly. * @upstash/redis handles JSON serialization. */ const cacheData = { improved, tokenUsage, grade }; await redis.setex(cacheKey, 3600, cacheData); return res.status(200).json({ improved, tokenUsage, grade, cached: false }); } catch (err) { console.error('Prompt improvement error:', err); return res.status(500).json({ error: `Server error: ${ err instanceof Error ? err.message : String(err) }` }); } }````javascript
+const { Redis } = require('@upstash/redis');
+const crypto = require('crypto');
 
 const redis = Redis.fromEnv();
 
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'openai/gpt-oss-20b';
+
+// Application rate limits.
+// These are usage-protection limits, not limits on the length of an individual prompt.
 const LIMITS = {
   reqPerMin: 30,
   reqPerDay: 1000,
@@ -10,481 +16,494 @@ const LIMITS = {
   tokPerDay: 100000
 };
 
-// Groq model
-const GROQ_MODEL = 'openai/gpt-oss-20b';
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const SYSTEM_PROMPT = `
+You are an expert prompt engineer and senior software/AI engineering mentor.
 
-// Optimized system prompt
-const SYSTEM_PROMPT = `You are a senior engineer rewriting rough prompts into precise, execution-ready instructions for AI coding agents. Follow these rules:
+Your job is to transform the user's raw prompt into a significantly better prompt that another AI can execute accurately.
 
-1. Problem first: State current issue before fix, integrating stack/context into problem statement.
-2. Numbered actions: Split requirements into distinct action steps; constraints attach to relevant step.
-3. Exact verbs: Replace vague terms like "improve" with specific changes.
-4. Explicit bounds: Add limits where open-ended; use [specify: x] for unknowns; never invent values.
-5. Stack clarity: State language/framework/db if given; use [specify: stack] only if unknown.
-6. Preserve existing: Keep behavior/data/naming unless told to change; add "do not modify" lines.
-7. No invention: Never invent names (files, tables, etc.); use [specify: x] for unknowns.
-8. DB safety: For schema/data changes, require rollback-safe approach; flag performance considerations.
-9. Single approach: Propose one technical fix per problem; use [specify: approach] if ambiguous.
-10. Unknown domain: If only general capability is given (e.g., "search"), flag domain: [specify: where].
-11. Confirmation: End with one-line verification statement.
-12. Cut filler: Remove all words that don't affect agent action.
+IMPORTANT:
+- Preserve the user's actual intent.
+- Improve the prompt; do not merely rephrase it.
+- Do not invent technologies, requirements, features, architecture, APIs, databases, services, or implementation details that the user did not request.
+- When an important technical decision is unknown, explicitly mark it as [specify: X] instead of guessing.
+- You may add useful constraints when they directly improve correctness, safety, or execution.
+- Do not remove important requirements just to make the prompt shorter.
+- Do not add unnecessary complexity.
+- Make the resulting prompt actionable and unambiguous.
+- If the user is asking for software development, clearly separate the goal, requirements, constraints, expected behavior, and deliverables where useful.
+- Preserve existing technology choices when the user explicitly provided them.
+- If no technology stack was specified, do not silently choose one.
+- If the user wants to learn, make the AI act as both an expert implementer and a technical mentor.
+- The improved prompt should tell the AI what to build/do, what decisions need to be explained, and what should be delivered.
+- For security-sensitive or destructive operations, require confirmation before irreversible actions.
+- Do not claim that something exists, has been tested, deployed, or verified unless the user explicitly said so.
+- Avoid filler, repetition, marketing language, and unnecessary explanations.
 
-Output only the rewritten prompt.`;
+OUTPUT FORMAT:
+- Return ONLY the improved prompt.
+- Do not explain what you changed.
+- Do not wrap the prompt in Markdown code fences.
+- Do not use asterisks for bold or emphasis.
+- Do not use decorative Markdown.
+- Do not add a "Here's your improved prompt" introduction.
+- Numbered lists are allowed when they make instructions clearer.
+- Use headings only when they genuinely improve organization.
+- Do not impose an arbitrary word, character, or sentence limit.
+- Use as much text as necessary to fully specify the user's request.
+- At the same time, remove unnecessary verbosity and repetition.
+- The final prompt should be complete rather than artificially short.
+`;
 
-// Grader prompt
-const GRADER_SYSTEM_PROMPT = `You are an expert prompt engineer evaluating the quality of a rewritten prompt.
+const GRADER_SYSTEM_PROMPT = `
+You are a strict prompt-quality evaluator.
 
 Evaluate the improved prompt against the original prompt.
 
-Score each criterion from 0-10:
+Score each criterion from 0 to 10:
 
-1. Accuracy: Does it faithfully capture the user's intent without adding or removing meaning?
-2. Hallucination: Does it avoid inventing specifics not present in the original?
-3. On-topic: Does it stay focused on the requested task?
-4. Token Efficiency: Is it concise while remaining complete?
-5. Clarity: Is the prompt easy for an AI to understand?
-6. Actionability: Does it provide clear, executable instructions?
-7. Rule Adherence: Does it follow the 12 rewriting rules?
+1. Accuracy
+Does the improved prompt correctly represent the user's request?
 
-Return ONLY valid JSON in exactly this format:
+2. Hallucination
+Does it avoid inventing unsupported technologies, requirements, facts, or assumptions?
+10 = no problematic invention.
+
+3. On-topic
+Does it remain focused on the user's actual goal?
+
+4. Token Efficiency
+Does it remove unnecessary repetition and filler while retaining useful detail?
+A longer prompt is NOT automatically inefficient if the extra detail is useful.
+
+5. Clarity
+Are the instructions unambiguous and easy for another AI to follow?
+
+6. Actionability
+Can another AI actually execute the request from the improved prompt?
+
+7. Rule Adherence
+Does the prompt follow the prompt-engineering rules, including preserving intent, avoiding unsupported assumptions, and handling unknowns appropriately?
+
+Return ONLY valid JSON in this exact structure:
 
 {
-  "accuracy": 0,
-  "hallucination": 0,
-  "on_topic": 0,
-  "token_efficiency": 0,
-  "clarity": 0,
-  "actionability": 0,
-  "rule_adherence": 0,
-  "feedback": "Brief feedback explaining the most important weaknesses."
+  "scores": {
+    "accuracy": 0,
+    "hallucination": 0,
+    "onTopic": 0,
+    "tokenEfficiency": 0,
+    "clarity": 0,
+    "actionability": 0,
+    "ruleAdherence": 0
+  },
+  "feedback": "Brief explanation of the main strengths and weaknesses."
 }
 
-All scores must be numbers from 0 to 10.`;
+Do not return Markdown.
+Do not wrap the JSON in code fences.
+`;
 
-// Get usage
-async function getUsage() {
-  const now = Date.now();
-
-  const minuteKey = `usage:minute:${Math.floor(now / 60000)}`;
-  const dayKey = `usage:day:${Math.floor(now / 86400000)}`;
-
-  const [
-    minReq,
-    minTok,
-    dayReq,
-    dayTok
-  ] = await Promise.all([
-    redis.get(`${minuteKey}:req`),
-    redis.get(`${minuteKey}:tok`),
-    redis.get(`${dayKey}:req`),
-    redis.get(`${dayKey}:tok`)
-  ]);
-
-  return {
-    minuteKey,
-    dayKey,
-    minute: {
-      requests: Number(minReq) || 0,
-      tokens: Number(minTok) || 0
-    },
-    day: {
-      requests: Number(dayReq) || 0,
-      tokens: Number(dayTok) || 0
-    }
-  };
+function hashPrompt(prompt) {
+  return crypto
+    .createHash('sha256')
+    .update(prompt)
+    .digest('hex');
 }
 
-// Record usage
-async function recordUsage(minuteKey, dayKey, tokens) {
-  await Promise.all([
-    redis.incrby(`${minuteKey}:req`, 1),
-    redis.incrby(`${minuteKey}:tok`, tokens),
-    redis.expire(`${minuteKey}:req`, 120),
-    redis.expire(`${minuteKey}:tok`, 120),
-
-    redis.incrby(`${dayKey}:req`, 1),
-    redis.incrby(`${dayKey}:tok`, tokens),
-    redis.expire(`${dayKey}:req`, 172800),
-    redis.expire(`${dayKey}:tok`, 172800)
-  ]);
-}
-
-// Estimate tokens
 function estimateTokens(text) {
   if (!text) return 0;
 
-  return Math.ceil(
-    text.trim().split(/\s+/).length * 1.3
-  );
+  // Approximate token count.
+  // Actual token usage is taken from the Groq API when available.
+  return Math.ceil(text.length / 4);
 }
 
-// Call Groq API
-async function callGroq(messages) {
-  if (!process.env.GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY is not configured');
-  }
+async function getUsage(ip) {
+  const minuteKey = `usage:min:${ip}`;
+  const dayKey = `usage:day:${ip}`;
+  const tokenMinuteKey = `usage:tok:min:${ip}`;
+  const tokenDayKey = `usage:tok:day:${ip}`;
 
+  const [reqMin, reqDay, tokMin, tokDay] = await Promise.all([
+    redis.get(minuteKey),
+    redis.get(dayKey),
+    redis.get(tokenMinuteKey),
+    redis.get(tokenDayKey)
+  ]);
+
+  return {
+    reqMin: Number(reqMin || 0),
+    reqDay: Number(reqDay || 0),
+    tokMin: Number(tokMin || 0),
+    tokDay: Number(tokDay || 0)
+  };
+}
+
+async function recordUsage(ip, tokens) {
+  const minuteKey = `usage:min:${ip}`;
+  const dayKey = `usage:day:${ip}`;
+  const tokenMinuteKey = `usage:tok:min:${ip}`;
+  const tokenDayKey = `usage:tok:day:${ip}`;
+
+  await Promise.all([
+    redis.incr(minuteKey),
+    redis.incr(dayKey),
+    redis.incrby(tokenMinuteKey, tokens),
+    redis.incrby(tokenDayKey, tokens)
+  ]);
+
+  await Promise.all([
+    redis.expire(minuteKey, 60),
+    redis.expire(dayKey, 86400),
+    redis.expire(tokenMinuteKey, 60),
+    redis.expire(tokenDayKey, 86400)
+  ]);
+}
+
+async function callGroq(messages) {
   const response = await fetch(GROQ_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`
     },
     body: JSON.stringify({
       model: GROQ_MODEL,
       messages,
-      temperature: 0.1,
-      max_tokens: 1024
+      temperature: 0.2,
+
+      // This is the model output allowance.
+      // There is no application-level character/word limit.
+      max_completion_tokens: 8000
     })
   });
 
+  const data = await response.json();
+
   if (!response.ok) {
-    const errorText = await response.text();
+    const message =
+      data?.error?.message ||
+      `Groq API request failed with status ${response.status}`;
 
-    throw new Error(
-      `Groq API error: ${response.status} ${errorText}`
-    );
+    throw new Error(message);
   }
 
-  return await response.json();
-}
+  const choice = data?.choices?.[0];
 
-// Safely extract JSON from grader response
-function parseGraderResponse(text) {
-  const defaultScores = {
-    accuracy: 5,
-    hallucination: 5,
-    on_topic: 5,
-    token_efficiency: 5,
-    clarity: 5,
-    actionability: 5,
-    rule_adherence: 5
+  if (!choice) {
+    throw new Error('Groq returned no completion.');
+  }
+
+  return {
+    content: choice.message?.content?.trim() || '',
+    usage: data.usage || {}
   };
-
-  if (!text || typeof text !== 'string') {
-    return {
-      scores: defaultScores,
-      feedback: 'Unable to parse grading response.'
-    };
-  }
-
-  try {
-    // Remove markdown code fences if the model adds them
-    const cleaned = text
-      .replace(/```json/gi, '')
-      .replace(/```/g, '')
-      .trim();
-
-    // Find the first JSON object
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-
-    if (start === -1 || end === -1 || end <= start) {
-      return {
-        scores: defaultScores,
-        feedback: 'Unable to parse grading response.'
-      };
-    }
-
-    const jsonText = cleaned.substring(start, end + 1);
-    const parsed = JSON.parse(jsonText);
-
-    const scores = {
-      accuracy: clampScore(parsed.accuracy),
-      hallucination: clampScore(parsed.hallucination),
-      on_topic: clampScore(parsed.on_topic),
-      token_efficiency: clampScore(parsed.token_efficiency),
-      clarity: clampScore(parsed.clarity),
-      actionability: clampScore(parsed.actionability),
-      rule_adherence: clampScore(parsed.rule_adherence)
-    };
-
-    const feedback =
-      typeof parsed.feedback === 'string'
-        ? parsed.feedback.trim()
-        : 'No feedback provided.';
-
-    return {
-      scores,
-      feedback
-    };
-
-  } catch (error) {
-    console.error('Grader JSON parse error:', error);
-
-    return {
-      scores: defaultScores,
-      feedback: 'Unable to parse grading response.'
-    };
-  }
 }
 
-// Keep individual score between 0 and 10
+function cleanImprovedPrompt(text) {
+  if (!text) return '';
+
+  let cleaned = text.trim();
+
+  // Remove accidental surrounding Markdown code fences.
+  cleaned = cleaned.replace(/^```(?:text|markdown)?\s*/i, '');
+  cleaned = cleaned.replace(/\s*```$/i, '');
+
+  // Remove a common introductory phrase if the model ignores the
+  // "return only the prompt" instruction.
+  cleaned = cleaned.replace(
+    /^(here(?:'s| is) (?:the )?(?:improved|optimized|refined) prompt:)\s*/i,
+    ''
+  );
+
+  return cleaned.trim();
+}
+
 function clampScore(value) {
   const number = Number(value);
 
   if (!Number.isFinite(number)) {
-    return 5;
+    return 0;
   }
 
-  return Math.min(10, Math.max(0, number));
+  return Math.max(0, Math.min(10, number));
 }
 
-// Calculate normalized 0-100 score
 function calculateTotalScore(scores) {
   const values = [
     scores.accuracy,
     scores.hallucination,
-    scores.on_topic,
-    scores.token_efficiency,
+    scores.onTopic,
+    scores.tokenEfficiency,
     scores.clarity,
     scores.actionability,
-    scores.rule_adherence
-  ];
+    scores.ruleAdherence
+  ].map(clampScore);
 
-  const rawScore = values.reduce(
-    (sum, value) => sum + value,
-    0
-  );
+  const rawScore = values.reduce((sum, value) => sum + value, 0);
 
   // 7 criteria × 10 = 70 maximum.
-  // Normalize to 100.
+  // Normalize to a 0–100 grade.
   return Math.round((rawScore / 70) * 100);
 }
 
+function parseGraderResponse(content) {
+  if (!content) {
+    throw new Error('Grader returned an empty response.');
+  }
+
+  let cleaned = content.trim();
+
+  // Remove Markdown code fences if the grader accidentally adds them.
+  cleaned = cleaned.replace(/^```json\s*/i, '');
+  cleaned = cleaned.replace(/^```\s*/i, '');
+  cleaned = cleaned.replace(/\s*```$/i, '');
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    // Try to extract the first JSON object.
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+
+    if (start === -1 || end === -1 || end <= start) {
+      throw new Error('Unable to parse grader JSON.');
+    }
+
+    parsed = JSON.parse(cleaned.slice(start, end + 1));
+  }
+
+  const rawScores = parsed.scores || {};
+
+  const scores = {
+    accuracy: clampScore(rawScores.accuracy),
+    hallucination: clampScore(rawScores.hallucination),
+    onTopic: clampScore(rawScores.onTopic),
+    tokenEfficiency: clampScore(rawScores.tokenEfficiency),
+    clarity: clampScore(rawScores.clarity),
+    actionability: clampScore(rawScores.actionability),
+    ruleAdherence: clampScore(rawScores.ruleAdherence)
+  };
+
+  return {
+    scores,
+    totalScore: calculateTotalScore(scores),
+    feedback:
+      typeof parsed.feedback === 'string'
+        ? parsed.feedback.trim()
+        : ''
+  };
+}
+
 export default async function handler(req, res) {
-  // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({
-      error: 'Use POST'
+      error: 'Method not allowed.'
     });
   }
 
   try {
-    const { prompt } = req.body || {};
-
-    // Validate prompt
-    if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({
-        error: 'Missing "prompt" in request body'
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({
+        error: 'GROQ_API_KEY is not configured.'
       });
     }
 
-    const trimmedPrompt = prompt.trim();
+    const ip =
+      req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+      req.headers['x-real-ip'] ||
+      'unknown';
 
-    if (!trimmedPrompt) {
+    const originalPrompt =
+      typeof req.body?.prompt === 'string'
+        ? req.body.prompt.trim()
+        : '';
+
+    if (!originalPrompt) {
       return res.status(400).json({
-        error: 'Prompt cannot be empty'
+        error: 'Prompt is required.'
       });
     }
 
-    // Check cache
-    const promptHash = crypto
-      .createHash('sha256')
-      .update(trimmedPrompt)
-      .digest('hex');
+    const usage = await getUsage(ip);
 
-    const cacheKey = `improved:${promptHash}`;
+    if (usage.reqMin >= LIMITS.reqPerMin) {
+      return res.status(429).json({
+        error: 'Too many requests. Please try again in a minute.'
+      });
+    }
 
-    const cached = await redis.get(cacheKey);
+    if (usage.reqDay >= LIMITS.reqPerDay) {
+      return res.status(429).json({
+        error: 'Daily request limit reached.'
+      });
+    }
+
+    if (usage.tokMin >= LIMITS.tokPerMin) {
+      return res.status(429).json({
+        error: 'Minute token limit reached. Please try again shortly.'
+      });
+    }
+
+    if (usage.tokDay >= LIMITS.tokPerDay) {
+      return res.status(429).json({
+        error: 'Daily token limit reached.'
+      });
+    }
+
+    const promptHash = hashPrompt(originalPrompt);
+    const cacheKey = `improve:${promptHash}`;
 
     /*
-     * IMPORTANT:
-     * @upstash/redis automatically deserializes JSON values.
-     *
-     * Therefore cached is already an object.
-     * DO NOT use JSON.parse(cached).
+     * Upstash Redis automatically serializes/deserializes JSON-compatible
+     * values. Therefore redis.get() may return an object directly.
      */
-    if (cached && typeof cached === 'object') {
-      const {
-        improved,
-        tokenUsage,
-        grade
-      } = cached;
+    const cached = await redis.get(cacheKey);
 
-      // Count cached request
-      const usage = await getUsage();
+    if (cached) {
+      let cacheData = cached;
 
-      await recordUsage(
-        usage.minuteKey,
-        usage.dayKey,
-        1
-      );
+      // Compatibility with any older cache entries that were stored
+      // as JSON strings.
+      if (typeof cacheData === 'string') {
+        try {
+          cacheData = JSON.parse(cacheData);
+        } catch {
+          cacheData = null;
+        }
+      }
 
-      const freshUsage = await getUsage();
+      if (
+        cacheData &&
+        typeof cacheData === 'object' &&
+        typeof cacheData.improved === 'string'
+      ) {
+        await recordUsage(
+          ip,
+          Number(cacheData.tokenUsage?.totalTokens || 1)
+        );
 
-      return res.status(200).json({
-        improved,
-        tokenUsage,
-        usage: {
-          minute: freshUsage.minute,
-          day: freshUsage.day
-        },
-        limits: LIMITS,
-        grade,
-        cached: true
-      });
+        return res.status(200).json({
+          improved: cacheData.improved,
+          tokenUsage: cacheData.tokenUsage || {
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0
+          },
+          grade: cacheData.grade || null,
+          cached: true
+        });
+      }
     }
 
-    // Check rate limits
-    const usage = await getUsage();
-
-    if (usage.minute.requests >= LIMITS.reqPerMin) {
-      return res.status(429).json({
-        error: 'Hit the per-minute request limit (30/min). Wait ~60s and try again.',
-        usage
-      });
-    }
-
-    if (usage.minute.tokens >= LIMITS.tokPerMin) {
-      return res.status(429).json({
-        error: 'Hit the per-minute token limit (12,000/min). Wait ~60s and try again.',
-        usage
-      });
-    }
-
-    if (usage.day.requests >= LIMITS.reqPerDay) {
-      return res.status(429).json({
-        error: 'Hit the daily request limit (1,000/day). Try again tomorrow.',
-        usage
-      });
-    }
-
-    if (usage.day.tokens >= LIMITS.tokPerDay) {
-      return res.status(429).json({
-        error: 'Hit the daily token limit (100,000/day). Try again tomorrow.',
-        usage
-      });
-    }
-
-    // ==========================================
-    // 1. IMPROVE PROMPT
-    // ==========================================
-
-    const groqResponse = await callGroq([
+    /*
+     * STEP 1:
+     * Improve the user's prompt.
+     */
+    const improvementResult = await callGroq([
       {
         role: 'system',
         content: SYSTEM_PROMPT
       },
       {
         role: 'user',
-        content: trimmedPrompt
+        content: originalPrompt
       }
     ]);
 
-    const improved =
-      groqResponse.choices?.[0]?.message?.content?.trim() ||
-      '(no response)';
+    const improved = cleanImprovedPrompt(improvementResult.content);
 
-    // Estimate improvement token usage
-    const promptTokens = estimateTokens(trimmedPrompt);
-    const completionTokens = estimateTokens(improved);
+    if (!improved) {
+      throw new Error('Groq returned an empty improved prompt.');
+    }
 
-    const tokenUsage = {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens
-    };
-
-    // ==========================================
-    // 2. GRADE IMPROVED PROMPT
-    // ==========================================
-
-    const gradeResponse = await callGroq([
+    /*
+     * STEP 2:
+     * Grade the improved prompt against the original.
+     */
+    const graderResult = await callGroq([
       {
         role: 'system',
         content: GRADER_SYSTEM_PROMPT
       },
       {
         role: 'user',
-        content:
-          `Original prompt:\n${trimmedPrompt}\n\n` +
-          `Improved prompt:\n${improved}`
+        content: JSON.stringify({
+          originalPrompt,
+          improvedPrompt: improved
+        })
       }
     ]);
 
-    const gradeText =
-      gradeResponse.choices?.[0]?.message?.content?.trim() ||
-      '';
-
-    const parsedGrade = parseGraderResponse(gradeText);
-
-    const totalScore = calculateTotalScore(
-      parsedGrade.scores
-    );
-
-    const grade = {
-      scores: parsedGrade.scores,
-      total: totalScore,
-      feedback: parsedGrade.feedback
-    };
-
-    // ==========================================
-    // 3. RECORD USAGE
-    // ==========================================
+    const grade = parseGraderResponse(graderResult.content);
 
     /*
-     * Include both improvement and grading calls.
-     * The previous version only estimated the improvement call.
+     * Prefer actual Groq token usage.
+     * Fall back to estimation if the API does not provide usage.
      */
-    const gradePromptTokens = estimateTokens(
-      trimmedPrompt + improved
-    );
+    const improvementPromptTokens =
+      Number(improvementResult.usage?.prompt_tokens) ||
+      estimateTokens(originalPrompt);
 
-    const gradeCompletionTokens = estimateTokens(
-      gradeText
-    );
+    const improvementCompletionTokens =
+      Number(improvementResult.usage?.completion_tokens) ||
+      estimateTokens(improved);
+
+    const gradingPromptTokens =
+      Number(graderResult.usage?.prompt_tokens) ||
+      estimateTokens(
+        JSON.stringify({
+          originalPrompt,
+          improvedPrompt: improved
+        })
+      );
+
+    const gradingCompletionTokens =
+      Number(graderResult.usage?.completion_tokens) ||
+      estimateTokens(graderResult.content);
+
+    const promptTokens =
+      improvementPromptTokens + gradingPromptTokens;
+
+    const completionTokens =
+      improvementCompletionTokens + gradingCompletionTokens;
 
     const totalTokens =
-      tokenUsage.total_tokens +
-      gradePromptTokens +
-      gradeCompletionTokens;
+      Number(improvementResult.usage?.total_tokens || 0) +
+      Number(graderResult.usage?.total_tokens || 0) ||
+      promptTokens + completionTokens;
 
-    await recordUsage(
-      usage.minuteKey,
-      usage.dayKey,
+    const tokenUsage = {
+      promptTokens,
+      completionTokens,
       totalTokens
-    );
+    };
 
-    const freshUsage = await getUsage();
+    /*
+     * Record the actual estimated/returned usage.
+     */
+    await recordUsage(ip, totalTokens);
 
-    // ==========================================
-    // 4. CACHE RESULT
-    // ==========================================
-
+    /*
+     * Store the object directly.
+     * @upstash/redis handles JSON serialization.
+     */
     const cacheData = {
       improved,
       tokenUsage,
       grade
     };
 
-    /*
-     * Redis accepts objects directly.
-     * It will serialize them automatically.
-     */
-    await redis.setex(
-      cacheKey,
-      3600,
-      cacheData
-    );
-
-    // ==========================================
-    // 5. RESPONSE
-    // ==========================================
+    await redis.setex(cacheKey, 3600, cacheData);
 
     return res.status(200).json({
       improved,
       tokenUsage,
-      usage: {
-        minute: freshUsage.minute,
-        day: freshUsage.day
-      },
-      limits: LIMITS,
       grade,
       cached: false
     });
-
   } catch (err) {
     console.error('Prompt improvement error:', err);
 
